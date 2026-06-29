@@ -904,7 +904,7 @@
 
       var metaHtml =
         '<div class="routine-meta">' +
-          '<button class="edit-time-btn" data-row="'+row.id+'">edit time</button>' +
+          '<button class="edit-time-btn" data-row="'+row.id+'">edit</button>' +
           (skipped
             ? '<button class="unskip-today-btn" data-row="'+row.id+'" data-iso="'+isoDate(d)+'">undo skip</button>'
             : '<button class="skip-today-btn" data-row="'+row.id+'" data-iso="'+isoDate(d)+'">not today</button>') +
@@ -1055,8 +1055,10 @@
     root.innerHTML =
       '<div class="picker-backdrop" id="picker-backdrop">'+
         '<div class="picker">'+
-          '<h3>'+escapeHtml(row.name)+'</h3>'+
-          '<p class="picker-sub">Set the usual time for this routine</p>'+
+          '<h3>Edit routine</h3>'+
+          '<p class="picker-sub">Change the wording or usual time for this routine</p>'+
+          '<label class="field-label" for="name-edit-input">Name</label>'+
+          '<div class="field-row"><input type="text" id="name-edit-input" value="'+escapeHtml(row.name)+'"></div>'+
           '<label class="field-label" for="time-edit-input">Time</label>'+
           '<div class="field-row"><input type="time" id="time-edit-input" value="'+(row.time||'')+'"></div>'+
           '<div class="btn-row">'+
@@ -1067,7 +1069,13 @@
         '</div>'+
       '</div>';
 
+    var nameInput = document.getElementById('name-edit-input');
+    nameInput.focus();
+    nameInput.select();
+
     document.getElementById('time-edit-save').addEventListener('click', function(){
+      var newName = nameInput.value.trim();
+      if(newName){ row.name = newName; }
       row.time = document.getElementById('time-edit-input').value || '';
       saveRows();
       closePicker();
