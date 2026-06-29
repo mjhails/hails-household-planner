@@ -178,20 +178,6 @@
     font-size:11px;cursor:pointer;padding:0;text-decoration:underline;
   }
   .routine-meta button:hover{color:var(--wife-text);}
-  .routine-card.skipped{
-    opacity:0.55;
-  }
-  .skip-pill{
-    flex-shrink:0;
-    border-radius:20px;
-    border:1px solid var(--line);
-    background:var(--empty);
-    color:var(--ink-faint);
-    font-size:12.5px;
-    font-weight:500;
-    padding:7px 14px;
-    white-space:nowrap;
-  }
   .who-btn{
     flex-shrink:0;
     border-radius:20px;
@@ -435,25 +421,6 @@
     border:1px solid var(--line);
     background:var(--empty);
   }
-  .picker .skip-list{
-    margin-top:10px;
-    max-height:120px;
-    overflow-y:auto;
-  }
-  .skip-item{
-    display:flex;
-    justify-content:space-between;
-    align-items:center;
-    font-size:12px;
-    color:var(--ink-soft);
-    padding:5px 0;
-    border-bottom:1px solid var(--line);
-  }
-  .skip-item:last-child{border-bottom:none;}
-  .skip-item button{
-    background:none;border:none;color:var(--wife-text);
-    font-size:11px;cursor:pointer;text-decoration:underline;
-  }
   .picker .btn-row{
     display:flex;
     gap:8px;
@@ -504,6 +471,39 @@
   }
 
   .hidden{display:none !important;}
+
+  /* ---------- TOAST ---------- */
+  #toast-root{
+    position:fixed;
+    bottom:18px;
+    left:0;right:0;
+    display:flex;
+    justify-content:center;
+    z-index:60;
+    pointer-events:none;
+  }
+  .toast{
+    background:var(--ink);
+    color:var(--paper-raised);
+    border-radius:10px;
+    padding:10px 14px;
+    font-size:13px;
+    display:flex;
+    align-items:center;
+    gap:14px;
+    box-shadow:0 6px 20px rgba(38,42,51,0.3);
+    pointer-events:auto;
+  }
+  .toast button{
+    background:none;
+    border:none;
+    color:var(--both);
+    font-weight:600;
+    font-size:13px;
+    cursor:pointer;
+    padding:0;
+    text-decoration:underline;
+  }
 </style>
 </head>
 <body>
@@ -562,6 +562,7 @@
 </div>
 
 <div id="picker-root"></div>
+<div id="toast-root"></div>
 
 <script type="module">
   // ---- Firebase setup ----
@@ -647,7 +648,7 @@
     activeTab: 'day',
     dayOffset: 0,      // days from today, for day view
     weekOffset: 0,     // weeks from this week, for week view
-    rows: DEFAULT_ROWS.map(function(r){ return { id: r.id, name: r.name, time: r.time || '', skips: [] }; }),
+    rows: DEFAULT_ROWS.map(function(r){ return { id: r.id, name: r.name, time: r.time || '', removedDates: [] }; }),
     assignments: {}    // key: "weekKey:rowId:dayIdx" -> {who, note}
   };
 
@@ -726,40 +727,43 @@
     }
   }
 
+  var toastTimer = null;
+  function showToast(message, onUndo){
+    var root = document.getElementById('toast-root');
+    if(toastTimer){ clearTimeout(toastTimer); }
+    root.innerHTML =
+      '<div class="toast"><span>'+escapeHtml(message)+'</span>'+
+      (onUndo ? '<button id="toast-undo-btn">Undo</button>' : '')+
+      '</div>';
+    if(onUndo){
+      document.getElementById('toast-undo-btn').addEventListener('click', function(){
+        root.innerHTML = '';
+        onUndo();
+      });
+    }
+    toastTimer = setTimeout(function(){ root.innerHTML = ''; }, 5000);
+  }
+
   function isoDate(d){
     return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());
   }
 
-  function isSkipped(row, dateObj){
-    if(!row.skips || !row.skips.length) return false;
-    var iso = isoDate(dateObj);
-    return row.skips.some(function(s){
-      return iso >= s.from && iso <= s.to;
-    });
+  function isRemovedForDay(row, dateObj){
+    if(!row.removedDates || !row.removedDates.length) return false;
+    return row.removedDates.indexOf(isoDate(dateObj)) !== -1;
   }
 
-  function activeSkipLabel(row, dateObj){
-    if(!row.skips) return '';
-    var iso = isoDate(dateObj);
-    var hit = row.skips.find(function(s){ return iso >= s.from && iso <= s.to; });
-    return hit ? (hit.label || 'Skipped') : '';
+  function removeForToday(row, iso){
+    if(!row.removedDates) row.removedDates = [];
+    if(row.removedDates.indexOf(iso) === -1){
+      row.removedDates.push(iso);
+    }
   }
 
-  function skipToday(row, iso){
-    if(!row.skips) row.skips = [];
-    row.skips.push({ from: iso, to: iso, label: '' });
-  }
-
-  // Removes today's skip if it's a single-day entry covering only today.
-  // If today falls inside a longer range (e.g. a holiday week), this does
-  // nothing and returns false, since shrinking a range safely needs the
-  // full skip manager rather than a one-tap guess.
-  function unskipToday(row, iso){
-    if(!row.skips) return true;
-    var idx = row.skips.findIndex(function(s){ return s.from === iso && s.to === iso; });
-    if(idx === -1) return false;
-    row.skips.splice(idx, 1);
-    return true;
+  function restoreForToday(row, iso){
+    if(!row.removedDates) return;
+    var idx = row.removedDates.indexOf(iso);
+    if(idx !== -1){ row.removedDates.splice(idx, 1); }
   }
 
   function escapeHtml(str){
@@ -783,7 +787,7 @@
       var rowsRes = await window.firestoreStorage.get('rows-config');
       if(rowsRes && rowsRes.value){
         state.rows = JSON.parse(rowsRes.value);
-        state.rows.forEach(function(r){ if(!r.skips) r.skips = []; });
+        state.rows.forEach(function(r){ if(!r.removedDates) r.removedDates = []; });
       }
     }catch(e){ console.error('load rows failed', e); }
 
@@ -803,7 +807,7 @@
       if(suppressNextRowsEcho){ suppressNextRowsEcho = false; return; }
       try{
         state.rows = JSON.parse(value);
-        state.rows.forEach(function(r){ if(!r.skips) r.skips = []; });
+        state.rows.forEach(function(r){ if(!r.removedDates) r.removedDates = []; });
         renderAll();
       }catch(e){ console.error(e); }
     });
@@ -891,12 +895,13 @@
     }
 
     rows.forEach(function(row){
+      if(isRemovedForDay(row, d)) return; // fully gone from today's list
+
       var k = assignKey(weekKey, row.id, dayIdx);
       var entry = state.assignments[k];
-      var skipped = isSkipped(row, d);
 
       var card = document.createElement('div');
-      card.className = 'routine-card' + (skipped ? ' skipped' : '');
+      card.className = 'routine-card';
 
       var timeHtml = row.time
         ? '<div class="routine-time">'+formatTime12(row.time)+'</div>'
@@ -905,37 +910,31 @@
       var metaHtml =
         '<div class="routine-meta">' +
           '<button class="edit-time-btn" data-row="'+row.id+'">edit</button>' +
-          (skipped
-            ? '<button class="unskip-today-btn" data-row="'+row.id+'" data-iso="'+isoDate(d)+'">undo skip</button>'
-            : '<button class="skip-today-btn" data-row="'+row.id+'" data-iso="'+isoDate(d)+'">not today</button>') +
-          '<button class="manage-skip-btn" data-row="'+row.id+'">'+(skipped ? 'manage skip' : 'skip a range')+'</button>' +
+          '<button class="remove-today-btn" data-row="'+row.id+'" data-iso="'+isoDate(d)+'">remove for today</button>' +
         '</div>';
 
       var mainHtml =
         '<div class="routine-main">' +
           '<div class="routine-name">'+escapeHtml(row.name)+'</div>' +
-          (skipped
-            ? '<div class="routine-note">'+escapeHtml(activeSkipLabel(row, d))+'</div>'
-            : (entry && entry.note ? '<div class="routine-note">'+escapeHtml(entry.note)+'</div>' : '')) +
+          (entry && entry.note ? '<div class="routine-note">'+escapeHtml(entry.note)+'</div>' : '') +
           metaHtml +
         '</div>';
 
-      var rightHtml;
-      if(skipped){
-        rightHtml = '<div class="skip-pill">Skipped</div>';
-      }else{
-        var whoClass = 'who-btn';
-        var whoLabel = '+ assign';
-        if(entry && entry.who){
-          whoClass += ' set ' + entry.who;
-          whoLabel = PEOPLE_LABELS[entry.who] || entry.who;
-        }
-        rightHtml = '<button class="'+whoClass+'" data-row="'+row.id+'" data-day="'+dayIdx+'">'+whoLabel+'</button>';
+      var whoClass = 'who-btn';
+      var whoLabel = '+ assign';
+      if(entry && entry.who){
+        whoClass += ' set ' + entry.who;
+        whoLabel = PEOPLE_LABELS[entry.who] || entry.who;
       }
+      var rightHtml = '<button class="'+whoClass+'" data-row="'+row.id+'" data-day="'+dayIdx+'">'+whoLabel+'</button>';
 
       card.innerHTML = timeHtml + mainHtml + rightHtml;
       list.appendChild(card);
     });
+
+    if(list.innerHTML === ''){
+      list.innerHTML = '<div class="empty-day">Nothing on the list for today.</div>';
+    }
   }
 
   // ---------- RENDER: WEEK OVERVIEW ----------
@@ -977,9 +976,9 @@
         cell.className = 'ov-cell';
         cell.setAttribute('data-row', row.id);
         cell.setAttribute('data-dayoffset', dayOffsetFor(d));
-        var skipped = isSkipped(row, d);
-        var dotClass = 'ov-dot' + (skipped ? '' : (entry && entry.who ? ' '+entry.who : ''));
-        cell.innerHTML = skipped
+        var removed = isRemovedForDay(row, d);
+        var dotClass = 'ov-dot' + (removed ? '' : (entry && entry.who ? ' '+entry.who : ''));
+        cell.innerHTML = removed
           ? '<div style="font-size:10px;color:var(--ink-faint);">&times;</div>'
           : '<div class="'+dotClass+'"></div>';
         daysWrap.appendChild(cell);
@@ -1095,75 +1094,7 @@
     });
   }
 
-  // ---------- SKIP MANAGER ----------
-  function openSkipManager(rowId){
-    var row = state.rows.find(function(r){ return r.id === rowId; });
-    if(!row) return;
-    if(!row.skips) row.skips = [];
-    var todayIso = isoDate(currentDayDate());
-
-    renderSkipManager(row, todayIso);
-  }
-
-  function renderSkipManager(row, todayIso){
-    var root = document.getElementById('picker-root');
-    var listHtml = row.skips.length
-      ? '<div class="skip-list">' + row.skips.map(function(s, i){
-          var rangeLabel = s.from === s.to ? fmtIsoShort(s.from) : (fmtIsoShort(s.from)+' \u2013 '+fmtIsoShort(s.to));
-          return '<div class="skip-item"><span>'+escapeHtml(s.label || 'Skipped')+' &middot; '+rangeLabel+'</span><button data-idx="'+i+'">remove</button></div>';
-        }).join('') + '</div>'
-      : '<p class="picker-sub" style="margin-top:10px;">No skips set for this routine yet.</p>';
-
-    root.innerHTML =
-      '<div class="picker-backdrop" id="picker-backdrop">'+
-        '<div class="picker">'+
-          '<h3>'+escapeHtml(row.name)+'</h3>'+
-          '<p class="picker-sub">Skip this routine for a day or a date range — handy for school holidays</p>'+
-          '<label class="field-label" for="skip-from">From</label>'+
-          '<div class="field-row"><input type="date" id="skip-from" value="'+todayIso+'"></div>'+
-          '<label class="field-label" for="skip-to">To (same as From for a single day)</label>'+
-          '<div class="field-row"><input type="date" id="skip-to" value="'+todayIso+'"></div>'+
-          '<label class="field-label" for="skip-label">Label (optional)</label>'+
-          '<div class="field-row"><input type="text" id="skip-label" placeholder="e.g. Half term"></div>'+
-          '<div class="btn-row"><button id="skip-add" class="primary">Add skip</button></div>'+
-          listHtml +
-          '<button class="picker-close" id="picker-close">Close</button>'+
-        '</div>'+
-      '</div>';
-
-    document.getElementById('skip-add').addEventListener('click', function(){
-      var from = document.getElementById('skip-from').value;
-      var to = document.getElementById('skip-to').value || from;
-      var label = document.getElementById('skip-label').value.trim();
-      if(!from){ return; }
-      if(to < from){ to = from; }
-      row.skips.push({ from: from, to: to, label: label });
-      saveRows();
-      renderSkipManager(row, todayIso);
-      renderAll();
-    });
-
-    root.querySelectorAll('.skip-item button').forEach(function(b){
-      b.addEventListener('click', function(){
-        var idx = parseInt(b.getAttribute('data-idx'),10);
-        row.skips.splice(idx,1);
-        saveRows();
-        renderSkipManager(row, todayIso);
-        renderAll();
-      });
-    });
-
-    document.getElementById('picker-close').addEventListener('click', closePicker);
-    document.getElementById('picker-backdrop').addEventListener('click', function(e){
-      if(e.target.id === 'picker-backdrop') closePicker();
-    });
-  }
-
-  function fmtIsoShort(iso){
-    var parts = iso.split('-');
-    var d = new Date(parseInt(parts[0],10), parseInt(parts[1],10)-1, parseInt(parts[2],10));
-    return d.getDate()+' '+d.toLocaleString('en-GB',{month:'short'});
-  }
+  // ---------- SKIP MANAGER (removed — replaced by simple per-day remove) ----------
 
   async function handlePickerChoice(who){
     if(!activePicker) return;
@@ -1220,32 +1151,19 @@
       openTimeEditor(editBtn.getAttribute('data-row'));
       return;
     }
-    var skipBtn = e.target.closest('.manage-skip-btn');
-    if(skipBtn){
-      openSkipManager(skipBtn.getAttribute('data-row'));
-      return;
-    }
-    var quickSkipBtn = e.target.closest('.skip-today-btn');
-    if(quickSkipBtn){
-      var qsRow = state.rows.find(function(r){ return r.id === quickSkipBtn.getAttribute('data-row'); });
-      if(qsRow){
-        skipToday(qsRow, quickSkipBtn.getAttribute('data-iso'));
+    var removeBtn = e.target.closest('.remove-today-btn');
+    if(removeBtn){
+      var rRow = state.rows.find(function(r){ return r.id === removeBtn.getAttribute('data-row'); });
+      var rIso = removeBtn.getAttribute('data-iso');
+      if(rRow){
+        removeForToday(rRow, rIso);
         saveRows();
         renderAll();
-      }
-      return;
-    }
-    var quickUnskipBtn = e.target.closest('.unskip-today-btn');
-    if(quickUnskipBtn){
-      var qusRow = state.rows.find(function(r){ return r.id === quickUnskipBtn.getAttribute('data-row'); });
-      if(qusRow){
-        var removed = unskipToday(qusRow, quickUnskipBtn.getAttribute('data-iso'));
-        if(removed){
+        showToast('Removed "'+rRow.name+'" for today', function(){
+          restoreForToday(rRow, rIso);
           saveRows();
           renderAll();
-        }else{
-          openSkipManager(qusRow.id);
-        }
+        });
       }
       return;
     }
@@ -1265,7 +1183,7 @@
     var name = input.value.trim();
     if(!name) return;
     var id = 'r' + Date.now();
-    state.rows.push({ id: id, name: name, time: timeInput.value || '', skips: [] });
+    state.rows.push({ id: id, name: name, time: timeInput.value || '', removedDates: [] });
     input.value = '';
     timeInput.value = '';
     saveRows();
