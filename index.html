@@ -205,6 +205,41 @@
     font-size:13.5px;
   }
 
+  /* ---------- REMOVED TODAY ---------- */
+  .removed-today{
+    margin-top:14px;
+  }
+  .removed-today-title{
+    font-size:11.5px;
+    color:var(--ink-faint);
+    text-transform:uppercase;
+    letter-spacing:0.05em;
+    margin-bottom:6px;
+    padding-left:2px;
+  }
+  .removed-item{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    padding:8px 14px;
+    border:1px dashed var(--line);
+    border-radius:10px;
+    margin-bottom:6px;
+    font-size:13px;
+    color:var(--ink-soft);
+  }
+  .removed-item button{
+    background:none;
+    border:none;
+    color:var(--mike-text);
+    font-size:12.5px;
+    font-weight:500;
+    cursor:pointer;
+    text-decoration:underline;
+    flex-shrink:0;
+  }
+
   /* ---------- ADD ROW ---------- */
   .add-row{
     background:var(--paper-raised);
@@ -534,6 +569,8 @@
 
     <div class="routine-list" id="routine-list"></div>
 
+    <div class="removed-today" id="removed-today"></div>
+
     <div class="add-row">
       <input type="text" id="new-routine-name" placeholder="Add a routine, e.g. Bath time">
       <input type="time" id="new-routine-time">
@@ -637,7 +674,7 @@
   var DEFAULT_ROWS = [
     { id: 'r1', name: 'Wake & feed Harvey', time: '07:00' },
     { id: 'r2', name: 'Amelia breakfast', time: '07:30' },
-    { id: 'r3', name: 'School / nursery drop-off', time: '08:30' },
+    { id: 'r3', name: 'School drop-off', time: '08:30' },
     { id: 'r4', name: 'School pick-up', time: '15:15' },
     { id: 'r5', name: 'Cooking tea', time: '17:30' },
     { id: 'r6', name: 'Gym slot', time: '' },
@@ -891,6 +928,7 @@
     var rows = sortedRows();
     if(rows.length === 0){
       list.innerHTML = '<div class="empty-day">No routines yet — add your first one below.</div>';
+      renderRemovedToday(d, dayIdx);
       return;
     }
 
@@ -935,6 +973,29 @@
     if(list.innerHTML === ''){
       list.innerHTML = '<div class="empty-day">Nothing on the list for today.</div>';
     }
+
+    renderRemovedToday(d, dayIdx);
+  }
+
+  function renderRemovedToday(d, dayIdx){
+    var container = document.getElementById('removed-today');
+    var iso = isoDate(d);
+    var removedRows = state.rows.filter(function(r){ return isRemovedForDay(r, d); });
+
+    if(removedRows.length === 0){
+      container.innerHTML = '';
+      return;
+    }
+
+    var itemsHtml = removedRows.map(function(r){
+      return '<div class="removed-item">' +
+        '<span>'+escapeHtml(r.name)+'</span>' +
+        '<button class="restore-today-btn" data-row="'+r.id+'" data-iso="'+iso+'">add back</button>' +
+      '</div>';
+    }).join('');
+
+    container.innerHTML =
+      '<div class="removed-today-title">Removed for this day</div>' + itemsHtml;
   }
 
   // ---------- RENDER: WEEK OVERVIEW ----------
@@ -1166,6 +1227,19 @@
         });
       }
       return;
+    }
+  });
+
+  document.getElementById('removed-today').addEventListener('click', function(e){
+    var restoreBtn = e.target.closest('.restore-today-btn');
+    if(restoreBtn){
+      var rtRow = state.rows.find(function(r){ return r.id === restoreBtn.getAttribute('data-row'); });
+      var rtIso = restoreBtn.getAttribute('data-iso');
+      if(rtRow){
+        restoreForToday(rtRow, rtIso);
+        saveRows();
+        renderAll();
+      }
     }
   });
 
