@@ -169,7 +169,8 @@
   }
   .routine-meta{
     display:flex;
-    gap:10px;
+    flex-wrap:wrap;
+    gap:4px 10px;
     margin-top:3px;
   }
   .routine-meta button{
@@ -744,6 +745,23 @@
     return hit ? (hit.label || 'Skipped') : '';
   }
 
+  function skipToday(row, iso){
+    if(!row.skips) row.skips = [];
+    row.skips.push({ from: iso, to: iso, label: '' });
+  }
+
+  // Removes today's skip if it's a single-day entry covering only today.
+  // If today falls inside a longer range (e.g. a holiday week), this does
+  // nothing and returns false, since shrinking a range safely needs the
+  // full skip manager rather than a one-tap guess.
+  function unskipToday(row, iso){
+    if(!row.skips) return true;
+    var idx = row.skips.findIndex(function(s){ return s.from === iso && s.to === iso; });
+    if(idx === -1) return false;
+    row.skips.splice(idx, 1);
+    return true;
+  }
+
   function escapeHtml(str){
     var div = document.createElement('div');
     div.textContent = str;
@@ -887,7 +905,10 @@
       var metaHtml =
         '<div class="routine-meta">' +
           '<button class="edit-time-btn" data-row="'+row.id+'">edit time</button>' +
-          '<button class="manage-skip-btn" data-row="'+row.id+'">'+(skipped ? 'manage skip' : 'skip dates')+'</button>' +
+          (skipped
+            ? '<button class="unskip-today-btn" data-row="'+row.id+'" data-iso="'+isoDate(d)+'">undo skip</button>'
+            : '<button class="skip-today-btn" data-row="'+row.id+'" data-iso="'+isoDate(d)+'">not today</button>') +
+          '<button class="manage-skip-btn" data-row="'+row.id+'">'+(skipped ? 'manage skip' : 'skip a range')+'</button>' +
         '</div>';
 
       var mainHtml =
@@ -1194,6 +1215,30 @@
     var skipBtn = e.target.closest('.manage-skip-btn');
     if(skipBtn){
       openSkipManager(skipBtn.getAttribute('data-row'));
+      return;
+    }
+    var quickSkipBtn = e.target.closest('.skip-today-btn');
+    if(quickSkipBtn){
+      var qsRow = state.rows.find(function(r){ return r.id === quickSkipBtn.getAttribute('data-row'); });
+      if(qsRow){
+        skipToday(qsRow, quickSkipBtn.getAttribute('data-iso'));
+        saveRows();
+        renderAll();
+      }
+      return;
+    }
+    var quickUnskipBtn = e.target.closest('.unskip-today-btn');
+    if(quickUnskipBtn){
+      var qusRow = state.rows.find(function(r){ return r.id === quickUnskipBtn.getAttribute('data-row'); });
+      if(qusRow){
+        var removed = unskipToday(qusRow, quickUnskipBtn.getAttribute('data-iso'));
+        if(removed){
+          saveRows();
+          renderAll();
+        }else{
+          openSkipManager(qusRow.id);
+        }
+      }
       return;
     }
   });
